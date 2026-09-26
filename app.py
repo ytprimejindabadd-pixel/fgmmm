@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 import requests
 
 app = Flask(__name__)
@@ -10,7 +10,7 @@ API_TG = "https://rtf-api-server.onrender.com/api?types=telegram&key=RTFSERVER&s
 API_ADV = "https://bronx-ultra-king.duckdns.org/api/custom/search?key=8509&num={num}"
 
 # ============================================
-# 🔧 TG Info — sirf 3 fields return karega
+# 🔧 TG Info — sirf 3 fields
 # ============================================
 def get_tg_info(spell):
     try:
@@ -18,7 +18,6 @@ def get_tg_info(spell):
         r = requests.get(url, timeout=15)
         data = r.json()
 
-        # result ke andar data hai
         result = data.get("result", {}) if isinstance(data, dict) else {}
 
         return {
@@ -30,7 +29,7 @@ def get_tg_info(spell):
         return {"error": str(e)}
 
 # ============================================
-# 🔧 Advance Info
+# 🔧 Advance
 # ============================================
 def get_advance_info(num):
     try:
@@ -41,47 +40,48 @@ def get_advance_info(num):
         return {"error": str(e)}
 
 # ============================================
-# 🌐 MAIN ROUTE — /tg=@username  ya  /tg?adv=
+# 🔥 HOOK — /tg=@user  aur  /tg?adv=@user handle karega
 # ============================================
-@app.route("/tg", methods=["GET"])
-@app.route("/tg=", methods=["GET"])
-def tg_route():
-    # ---- Mode 1: Advance ----
-    if "adv" in request.args:
-        # spell nikalna — ya to ?adv=@user ya ?adv=6624927061
+@app.before_request
+def catch_tg_equals():
+    path = request.path
+
+    # Case 1: /tg=@username  (path me = ke saath)
+    if path.startswith("/tg="):
+        spell = path[4:]  # "@username" ya "6624927061"
+        spell = spell.strip()
+
+        if not spell:
+            return jsonify({"error": "Spell khali hai"}), 400
+
+        # Agar adv chahiye? URL: /tg=@user?adv=1
+        if "adv" in request.args:
+            tg = get_tg_info(spell)
+            num = tg.get("Number")
+            if not num:
+                return jsonify({"error": "Number nahi mila", "tg": tg}), 404
+            return jsonify(get_advance_info(num))
+
+        # Normal TG Info
+        return jsonify(get_tg_info(spell))
+
+    # Case 2: /tg?adv=@username  (query me adv ke saath)
+    if path == "/tg" and "adv" in request.args:
         spell = request.args.get("adv", "").strip()
         if not spell:
-            return jsonify({"error": "adv parameter khali hai"}), 400
+            return jsonify({"error": "adv khali hai"}), 400
 
-        # TG se number lo
         tg = get_tg_info(spell)
         num = tg.get("Number")
         if not num:
             return jsonify({"error": "Number nahi mila", "tg": tg}), 404
+        return jsonify(get_advance_info(num))
 
-        # Advance API me bhejo
-        adv = get_advance_info(num)
-        return jsonify(adv)
-
-    # ---- Mode 2: TG Info ----
-    # URL: /tg=@username  ya  /tg=6624927061
-    spell = request.args.get("spell") or request.args.get("q")
-
-    # Agar path se aaya (jaise /tg=@user)
-    if not spell:
-        # raw path se nikalne ki koshish
-        raw = request.full_path.rstrip("?")
-        if raw.startswith("/tg="):
-            spell = raw[4:]
-        elif raw.startswith("/tg"):
-            spell = ""
-
-    if not spell:
-        return jsonify({"error": "Spell daalo — /tg=@username ya /tg?adv=@username"}), 400
-
-    # Agar number diya (6624927061) to @ laga do? Nahi, API jaisa hai waisa bhejo
-    tg = get_tg_info(spell)
-    return jsonify(tg)
+    # Case 3: /tg?spell=@user  ya  /tg?q=@user
+    if path == "/tg":
+        spell = request.args.get("spell") or request.args.get("q")
+        if spell:
+            return jsonify(get_tg_info(spell.strip()))
 
 # ============================================
 # 🏠 HOME
